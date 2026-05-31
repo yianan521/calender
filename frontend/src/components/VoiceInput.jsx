@@ -1,37 +1,48 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVoiceInput } from '../hooks/useVoiceInput'
 
 export default function VoiceInput({ onResult, compact = false }) {
-  const { isListening, transcript, isSupported, startListening, stopListening, clearTranscript } = useVoiceInput()
   const [text, setText] = useState('')
   const [status, setStatus] = useState('')
   const [animActive, setAnimActive] = useState(false)
   const inputRef = useRef(null)
+  const textRef = useRef('')
+
+  // Keep ref in sync so callbacks can always read latest text
+  textRef.current = text
+
+  const handleSubmit = useCallback(async (msg) => {
+    const message = (typeof msg === 'string' ? msg : textRef.current).trim()
+    if (!message) return
+
+    setStatus('处理中...')
+    try {
+      const res = await onResult(message)
+      if (res?.reply) {
+        setStatus(res.reply)
+      }
+      setText('')
+    } catch (err) {
+      setStatus('出错了，请重试')
+    } finally {
+      setTimeout(() => setStatus(''), 5000)
+    }
+  }, [onResult])
+
+  const onVoiceEnd = useCallback((finalTranscript) => {
+    setAnimActive(false)
+    if (finalTranscript?.trim()) {
+      handleSubmit(finalTranscript)
+    }
+  }, [handleSubmit])
+
+  const { isListening, transcript, isSupported, startListening, stopListening, clearTranscript } = useVoiceInput({ onVoiceEnd })
 
   useEffect(() => {
     if (transcript) {
       setText(transcript)
     }
   }, [transcript])
-
-  const handleSubmit = async () => {
-    const msg = text.trim()
-    if (!msg) return
-
-    setStatus('处理中...')
-    try {
-      const res = await onResult(msg)
-      if (res?.reply) {
-        setStatus(res.reply)
-      }
-      setText('')
-      clearTranscript()
-    } catch (err) {
-      setStatus('出错了，请重试')
-    } finally {
-      setTimeout(() => setStatus(''), 5000)
-    }
-  }
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -46,6 +57,8 @@ export default function VoiceInput({ onResult, compact = false }) {
       setAnimActive(false)
       if (text.trim()) handleSubmit()
     } else {
+      setText('')
+      clearTranscript()
       startListening()
       setAnimActive(true)
     }
@@ -69,7 +82,11 @@ export default function VoiceInput({ onResult, compact = false }) {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入或点击麦克风..."
+            placeholder={
+              isListening
+                ? (transcript ? '正在识别...' : '正在聆听...')
+                : '输入或点击麦克风...'
+            }
           />
         </div>
         {status && <div className="voice-status-bar">{status}</div>}
@@ -95,7 +112,7 @@ export default function VoiceInput({ onResult, compact = false }) {
         {!isSupported && (
           <p className="voice-warning">您的浏览器不支持语音识别，请使用 Chrome 浏览器</p>
         )}
-        {isListening && <p className="voice-hint">正在聆听...</p>}
+        {isListening && <p className="voice-hint">{transcript ? '正在识别...' : '正在聆听...'}</p>}
       </div>
 
       <div className="voice-input-box">
@@ -106,7 +123,7 @@ export default function VoiceInput({ onResult, compact = false }) {
           placeholder="输入文字或点击麦克风说话..."
           rows={3}
         />
-        <button className="btn-primary send-btn" onClick={handleSubmit} disabled={!text.trim()}>
+        <button className="btn-primary send-btn" onClick={() => handleSubmit()} disabled={!text.trim()}>
           发送
         </button>
       </div>
